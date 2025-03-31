@@ -7,15 +7,17 @@ setup(
     description="Bayesian Generalized linear modeling and GAMs utilizing NumPyro",
     packages=find_packages(),
     install_requires=[
+        "jax[cpu]",
         "pandas",
         "arviz",
         "numpyro",
+        "pyro-ppl",
         "optax",
         "numpy",
         "patsy",
-        "jax",
         "scikit-learn",
-        "scipy"
+        "scipy",
+        "patsy"
     ],
     python_requires=">=3.8",
 )

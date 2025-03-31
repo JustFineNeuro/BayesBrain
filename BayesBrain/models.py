@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as linalg
 import numpyro
@@ -70,6 +71,98 @@ def grouped_ard(basis_x_list, y, fit_intercept=True, cauchy=0.1, type='poisson')
 
         numpyro.sample("y", dist.ZeroInflatedPoisson(rate=rate, gate=pi), obs=y)
 
+# Version 2: Binary Concrete Spike-and-Slab with Annealing
+
+
+def grouped_ss_concrete(*,rng_key=None, **kwargs):
+    return grouped_ss_concrete_inner(**kwargs)
+
+def grouped_ss_concrete_inner(*, basis_x_list, y, fit_intercept=True, probs=0.5, temperature=0.5, type='poisson',prior_alpha=0.2):
+
+    def binary_concrete(name, log_alpha, temperature):
+        u = numpyro.sample(f"{name}_u", dist.Uniform(0, 1))
+        gumbel = -jnp.log(-jnp.log(u + 1e-8) + 1e-8)
+        return jax.nn.sigmoid((log_alpha + gumbel) / temperature)
+
+    num_groups = len(basis_x_list)
+    beta_list = []
+
+    if fit_intercept:
+        intercept = numpyro.sample("intercept", dist.Normal(0, 10))
+
+    for i, Xg in enumerate(basis_x_list):
+        n_features = Xg.shape[1]
+        if n_features == 0:
+            raise ValueError(f"Group {i} has zero features!")
+
+        log_alpha = numpyro.sample(f"logit_{i}", dist.Normal(jnp.log(probs / (1 - probs)), prior_alpha))
+        gamma_i = binary_concrete(f"gate_{i}", log_alpha, temperature)
+        numpyro.deterministic(f"gamma_{i}", gamma_i)
+
+        beta_i = numpyro.sample(f"beta_{i}", dist.Normal(0, 1).expand([n_features]))
+        beta_list.append(gamma_i * beta_i)
+
+    X_full = jnp.concatenate(basis_x_list, axis=1)
+    beta_full = jnp.concatenate(beta_list)
+
+    linear_pred = jnp.dot(X_full, beta_full)
+    if fit_intercept:
+        linear_pred += intercept
+
+    if type == 'poisson':
+        numpyro.sample("y", dist.Poisson(rate=jnp.exp(linear_pred)), obs=y)
+    elif type == 'negbin':
+        mu = jnp.exp(linear_pred)
+        r = numpyro.sample("r", dist.Gamma(2.0, 1.0))
+        numpyro.sample("y", dist.NegativeBinomial(total_count=r, logits=jnp.log(mu)), obs=y)
+    elif type == 'zip':
+        rate = jnp.exp(linear_pred)
+        pi = numpyro.sample("pi", dist.Beta(2.0, 2.0))
+        numpyro.sample("y", dist.ZeroInflatedPoisson(rate=rate, gate=pi), obs=y)
+
+
+# Version 1: Deterministic Sigmoid Spike-and-Slab
+
+def grouped_ss_deterministic(basis_x_list, y, fit_intercept=True, probs=0.5, temperature=0.5, type='poisson'):
+    import numpyro
+    import numpyro.distributions as dist
+    import jax.numpy as jnp
+
+    num_groups = len(basis_x_list)
+    beta_list = []
+
+    if fit_intercept:
+        intercept = numpyro.sample("intercept", dist.Normal(0, 10))
+
+    for i, Xg in enumerate(basis_x_list):
+        n_features = Xg.shape[1]
+        if n_features == 0:
+            raise ValueError(f"Group {i} has zero features!")
+
+        logit = numpyro.sample(f"logit_{i}", dist.Normal(jnp.log(probs / (1 - probs)), 1.0))
+        gamma_i = jax.nn.sigmoid(logit / temperature)
+        numpyro.deterministic(f"gamma_{i}", gamma_i)
+
+        beta_i = numpyro.sample(f"beta_{i}", dist.Normal(0, 1).expand([n_features]))
+        beta_list.append(gamma_i * beta_i)
+
+    X_full = jnp.concatenate(basis_x_list, axis=1)
+    beta_full = jnp.concatenate(beta_list)
+
+    linear_pred = jnp.dot(X_full, beta_full)
+    if fit_intercept:
+        linear_pred += intercept
+
+    if type == 'poisson':
+        numpyro.sample("y", dist.Poisson(rate=jnp.exp(linear_pred)), obs=y)
+    elif type == 'negbin':
+        mu = jnp.exp(linear_pred)
+        r = numpyro.sample("r", dist.Gamma(2.0, 1.0))
+        numpyro.sample("y", dist.NegativeBinomial(total_count=r, logits=jnp.log(mu)), obs=y)
+    elif type == 'zip':
+        rate = jnp.exp(linear_pred)
+        pi = numpyro.sample("pi", dist.Beta(2.0, 2.0))
+        numpyro.sample("y", dist.ZeroInflatedPoisson(rate=rate, gate=pi), obs=y)
 
 
 def prs_double_penalty(basis_x_list, S_list, y=None, fit_intercept=True, cauchy=0.1, sigma=1.0, jitter=1e-6,

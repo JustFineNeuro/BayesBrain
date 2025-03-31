@@ -1,10 +1,8 @@
 import pandas as pd
 import numpy as np
-import scipy as sp
 import patsy
 import jax.numpy as jnp
-from scipy.linalg import hankel
-from GLM import utils as ut
+from BayesBrain import utils as ut
 
 
 def pac_dummy_dsgn(Xin,nbases=None):

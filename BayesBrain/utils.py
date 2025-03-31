@@ -5,6 +5,7 @@ from patsy import dmatrices, build_design_matrices
 from scipy.linalg import hankel
 import re
 
+
 class PatsyTransformer(BaseEstimator, TransformerMixin):
     def __init__(self, formula):
         self.formula = formula
@@ -34,6 +35,27 @@ class PatsyTransformer(BaseEstimator, TransformerMixin):
         X_transformed = pd.DataFrame(X_transformed, columns=self.design_info_.column_names)
         return X_transformed
 
+
+def param_defaults_bayes(modname='grouped_ss_concrete'):
+    if modname == 'grouped_ss_concrete':
+        params = {
+            'fittype': 'vi',
+            'guide': 'normal',
+            'visteps': 30000,
+            'temperature_schedule': lambda step: max(0.01, 0.9 * (0.99 ** step)),
+            'optimtype': 'scheduled',
+        'type':'poisson',
+        'probs':0.5,
+        'prior_alpha':0.01}
+    elif modname == 'grouped_ss_deterministic':
+        params = {
+            'fittype': 'vi',
+            'guide': 'normal',
+            'visteps': 30000,
+            'temperature': 0.5,
+            'optimtype': 'scheduled'}
+
+    return params
 
 def calculate_aic_bic_poisson(n, neg_mean_poisson_deviance, k):
     # Convert mean negative deviance to total log-likelihood

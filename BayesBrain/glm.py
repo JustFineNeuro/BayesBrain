@@ -2,6 +2,7 @@ import pandas as pd
 import arviz as az
 import numpyro.distributions as dist
 import numpyro.optim as optim
+import numpyro
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoDelta, AutoNormal, AutoMultivariateNormal, AutoLaplaceApproximation
 from numpyro.infer import MCMC, NUTS
@@ -12,8 +13,8 @@ import numpy as np
 import patsy
 import jax
 import jax.numpy as jnp
-from GLM.utils import PatsyTransformer, calculate_aic_bic_poisson,smoothing_penalty_matrix_sklearn
-from GLM import models as mods
+from BayesBrain.utils import PatsyTransformer, calculate_aic_bic_poisson,smoothing_penalty_matrix_sklearn
+from BayesBrain import models as mods
 from sklearn.metrics import mean_poisson_deviance
 from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.base import BaseEstimator, RegressorMixin
@@ -94,7 +95,7 @@ def extract_variable_basis_from_formula(formula):
 class PoissonGLM:
     def __init__(self, smooth_lambda=0.001):
         """
-        Poisson GLM with smoothness regularization.
+        Poisson BayesBrain with smoothness regularization.
         """
         self.smooth_lambda = smooth_lambda  # Regularization weight
         self.pipeline = None
@@ -147,7 +148,7 @@ class PoissonGLM:
 
     def fit(self, params={'cv': 5, 'shuffleTime': True}):
         """
-        Fit Poisson GLM with smoothing regularization.
+        Fit Poisson BayesBrain with smoothing regularization.
         """
         self.fit_params = params
 
@@ -222,12 +223,12 @@ class PoissonGLM:
 
         design_matrix = self.best_pipeline.named_steps['patsy'].transform(pred_data)
         eta_pred = design_matrix @ self.best_beta
-        return np.exp(eta_pred)  # Poisson GLM applies exp transformation
+        return np.exp(eta_pred)  # Poisson BayesBrain applies exp transformation
 
 class PoissonGLMEstimator(BaseEstimator, RegressorMixin):
     def __init__(self, formula='y ~ 1', smooth_lambda=0.001):
         """
-        Poisson GLM with smoothing regularization, sklearn-compatible for GridSearchCV.
+        Poisson BayesBrain with smoothing regularization, sklearn-compatible for GridSearchCV.
         """
         self.formula = formula
         self.smooth_lambda = smooth_lambda  # Regularization weight
@@ -238,7 +239,7 @@ class PoissonGLMEstimator(BaseEstimator, RegressorMixin):
 
     def fit(self, X, y):
         """
-        Fit the Poisson GLM using smoothing regularization.
+        Fit the Poisson BayesBrain using smoothing regularization.
         """
         self.X_train = X
         self.y_train = y
@@ -313,12 +314,12 @@ class PoissonGLMEstimator(BaseEstimator, RegressorMixin):
 
         design_matrix = self.pipeline.named_steps['patsy'].transform(X)
         eta_pred = design_matrix @ self.best_beta
-        return np.exp(eta_pred)  # Poisson GLM applies exp transformation
+        return np.exp(eta_pred)  # Poisson BayesBrain applies exp transformation
 
 class GaussianGLMEstimator(BaseEstimator, RegressorMixin):
     def __init__(self, formula='y ~ 1', smooth_lambda=0.001, l1_lambda=0):
         """
-        Poisson GLM with smoothing regularization, sklearn-compatible for GridSearchCV.
+        Poisson BayesBrain with smoothing regularization, sklearn-compatible for GridSearchCV.
         """
         self.formula = formula
         self.smooth_lambda = smooth_lambda  # Regularization weight
@@ -330,7 +331,7 @@ class GaussianGLMEstimator(BaseEstimator, RegressorMixin):
 
     def fit(self, X, y):
         """
-        Fit the Poisson GLM using smoothing regularization.
+        Fit the Poisson BayesBrain using smoothing regularization.
         """
         self.X_train = X
         self.y_train = y
@@ -406,7 +407,7 @@ class GaussianGLMEstimator(BaseEstimator, RegressorMixin):
 
         design_matrix = self.pipeline.named_steps['patsy'].transform(X)
         eta_pred = design_matrix @ self.best_beta
-        return eta_pred  # Poisson GLM applies exp transformation
+        return eta_pred  # Poisson BayesBrain applies exp transformation
 
 class LogisticGLM:
     def __init__(self):
@@ -625,6 +626,8 @@ class PoissonGLMbayes:
         self.tensor_basis_list = tensor_basis_list
         self.S_tensor_list = S_tensor_list
         self.cat_basis_list = cat_basis
+        if model =='grouped_ss_concrete':
+            model='grouped_ss_concrete_inner'
         self.model = getattr(mods, model)
         self.modname = model
 
@@ -691,7 +694,7 @@ class PoissonGLMbayes:
                     optimizer = optim.ClippedAdam(step_size=params['lrate'])
                     svi = SVI(self.model, self.guide, optimizer, loss=Trace_ELBO())
 
-                #get inputs
+
                 # Get names of arguments expected by self.model
                 model_signature = inspect.signature(self.model)
                 model_args = set(model_signature.parameters.keys())
@@ -720,18 +723,49 @@ class PoissonGLMbayes:
                 if 'jitter' in model_args:
                     model_inputs['jitter'] = 1e-6
 
+                if 'probs' in model_args: #Deals with prior inclusion probability
+                    if 'probs' in params:
+                        print(params['probs'])
+                        model_inputs['probs'] = params['probs']
+                    else:
+                        model_inputs['probs'] = 0.5 # uniform prior effectively on 'binary variable'
+
+                if 'temperature' in model_args:
+                    if 'temperature' in params:
+                        model_inputs['temperature'] = params['temperature']
+                    else:
+                        model_inputs['temperature'] = 0.5 # Set a default softmx temp
+
+                if 'type' in params:
+                    model_inputs['type'] = params['type']
+
+                if 'prior_alpha' in params:
+                    model_inputs['prior_alpha'] = params['prior_alpha']
+
                 # Allow overrides via kwargs
                 model_inputs.update(kwargs)
 
-                # Run SVI
-                self.svi_result = svi.run(jax.random.PRNGKey(0), params['visteps'], **model_inputs)
+                # Run SVI (special treatment for spike slab concrete)
+                if self.modname == 'grouped_ss_concrete' and 'temperature_schedule' in params:
+                    rng_key = jax.random.PRNGKey(0)
+                    print("model_inputs:", model_inputs)
 
-                # # Run inference
-                # self.svi_result = svi.run(jax.random.PRNGKey(0), params['visteps'], basis_x_list=self.basis_x_list,
-                #                           S_list=self.S_list, y=self.y,
-                #                           tensor_basis_list=self.tensor_basis_list, S_tensor_list=self.S_tensor_list,
-                #                           cat_basis=self.cat_basis_list, jitter=1e-6, **kwargs)
-                self.svi=svi
+                    svi_state = svi.init(rng_key, **model_inputs)
+                    losses = []
+
+                    for step in range(params['visteps']):
+                        model_inputs['temperature'] = params['temperature_schedule'](step)
+                        rng_key, subkey = jax.random.split(rng_key)
+                        model_inputs.pop("rng_key", None)  # 👈 Fix here
+                        loss, svi_state = svi.update(svi_state, subkey, **model_inputs)
+                        losses.append(loss)
+
+                    self.svi_result = svi_state
+                    self.losses = losses
+                else:
+                    self.svi_result = svi.run(jax.random.PRNGKey(0), params['visteps'], **model_inputs)
+
+                self.svi = svi
             self.fit_params = params
 
         return self
@@ -752,7 +786,7 @@ class PoissonGLMbayes:
                 _posterior_samples = self.guide.sample_posterior(jax.random.PRNGKey(1), self.svi_result.params,
                                                                  sample_shape=(nsamples,))
 
-                if self.modname is not 'grouped_ard':
+                if self.modname != 'grouped_ard':
                     self.posterior_samples = {key: _posterior_samples[key] for key in _posterior_samples if
                                                key.startswith("beta_") or key.startswith("intercept") or key.startswith("cat_")}
                 else:
