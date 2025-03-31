@@ -1,9 +1,5 @@
 import pandas as pd
 import arviz as az
-import flax.linen as flax_nn
-from functools import partial
-from jax import nn
-import numpyro
 import numpyro.distributions as dist
 import numpyro.optim as optim
 from numpyro.infer import SVI, Trace_ELBO

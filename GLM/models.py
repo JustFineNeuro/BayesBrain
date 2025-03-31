@@ -2,9 +2,6 @@ import jax.numpy as jnp
 import jax.scipy.linalg as linalg
 import numpyro
 import numpyro.distributions as dist
-import numpyro.optim as optim
-from numpyro.infer import SVI, Trace_ELBO
-from numpyro.infer.autoguide import AutoDelta, AutoNormal, AutoMultivariateNormal, AutoLaplaceApproximation
 
 
 def grouped_ard(basis_x_list, y, fit_intercept=True, cauchy=0.1, type='poisson'):
