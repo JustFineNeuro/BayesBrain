@@ -7,7 +7,7 @@ long_description = (this_dir / "README.md").read_text()
 
 setup(
     name="BayesBrain",
-    version="0.1.0",
+    version="0.1.1",
     author="Your Name",
     description="Bayesian Generalized linear modeling and GAMs utilizing NumPyro",
     long_description=long_description,
